@@ -241,6 +241,8 @@ def parseExcel(filePath, fileName):
                     configname += str(i)
                 filedata = getLuaText(configname, data, fileName, tabTitle[1], tabTitle[0])
                 writeToLua(filePath, filedata[0], filedata[1])
+            else:
+                print("%s表无内容！！！" % filePath)
     else:
         isXls = False
         excel = openpyxl.load_workbook(filePath)
@@ -259,6 +261,8 @@ def parseExcel(filePath, fileName):
                 filedata = getLuaText(configname, data, fileName, tabTitle[1], tabTitle[0])
                 # 写入文件
                 writeToLua(filePath, filedata[0], filedata[1])
+            else:
+                print("%s表无内容！！！" % filePath)
 
 
 # 1.excel 文件夹路径 2.lua文件路径
