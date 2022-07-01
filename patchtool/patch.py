@@ -87,13 +87,13 @@ def gen_res_list(patch_path):
 
 
 def get_latest_version(hotfixpath):
-    latest = "0"
+    latest = 0
     if os.path.exists(hotfixpath):
         patches = os.listdir(hotfixpath)
         for filename in patches:
             if filename.isdigit():
-                if int(filename) > int(latest):
-                    latest = filename
+                if int(filename) > latest:
+                    latest = int(filename)
     else:
         print("not exists " + hotfixpath + " !!!")
 
@@ -155,7 +155,7 @@ def patch(platform, modify_min_version):
     latest_version = get_latest_version(res_filepath)
     tempfilepath = os.path.join(res_filepath, "temp")
     if os.path.exists(tempfilepath):
-        latest_version = int(latest_version) + 1
+        latest_version = latest_version + 1
         path_filepath = os.path.join(res_filepath, str(latest_version))
         os.rename(tempfilepath, path_filepath)
         gen_res_list(path_filepath)
