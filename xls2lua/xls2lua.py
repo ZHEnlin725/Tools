@@ -242,7 +242,7 @@ def parseExcel(filePath, fileName):
                 filedata = getLuaText(configname, data, fileName, tabTitle[1], tabTitle[0])
                 writeToLua(filePath, filedata[0], filedata[1])
             else:
-                print("%s表无内容！！！" % filePath)
+                print("%s表无内容暂时无法生成LuaTable！！！" % filePath)
     else:
         isXls = False
         excel = openpyxl.load_workbook(filePath)
@@ -262,7 +262,7 @@ def parseExcel(filePath, fileName):
                 # 写入文件
                 writeToLua(filePath, filedata[0], filedata[1])
             else:
-                print("%s表无内容！！！" % filePath)
+                print("%s表无内容暂时无法生成LuaTable！！！" % filePath)
 
 
 # 1.excel 文件夹路径 2.lua文件路径
@@ -278,7 +278,7 @@ if __name__ == "__main__":
     if not os.path.exists(luaPath):
         os.makedirs(luaPath)
     findAllFile(parseExcel)
-    print('parse excel success!')
+    print('parse excel finished!')
 else:
     print('参数不正确')
     sys.exit(1)
