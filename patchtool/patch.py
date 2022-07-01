@@ -150,6 +150,7 @@ def patch(platform, modify_min_version):
     platform_name = str(platform.name).lower()
     res_filepath = os.path.join(res_folder, platform_name)
     if not os.path.exists(res_filepath):
+        print("该路径%s不存在,无法生成%s平台的热更补丁！！！" % (res_filepath, platform_name))
         return
     latest_version = get_latest_version(res_filepath)
     tempfilepath = os.path.join(res_filepath, "temp")
@@ -171,6 +172,7 @@ def patch(platform, modify_min_version):
     print("热更文件已生成 平台:" + platform_name + ",最新版本:" + str(latest_version))
 
 
-patch(Platform.iOS, len(sys.argv) > 1)
+modify_min_version = len(sys.argv) > 1
 
-patch(Platform.Android, len(sys.argv) > 1)
+for platform in list(Platform):
+    patch(platform, modify_min_version)
