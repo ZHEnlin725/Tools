@@ -12,12 +12,14 @@ public static class PictureUtils
         MaxDegreeOfParallelism = 16
     };
 
-    public static IList<Texture2D> ExtractByCellSize(Texture2D rawAtlas, int cellWidth, int cellHeight)
+    public static IList<Texture2D> ExtractByCellSize(Texture2D rawAtlas, int cellWidth, int cellHeight,
+        Vector2Int offset = default, Vector2Int padding = default)
     {
         var pixels = rawAtlas.GetPixels();
         int width = rawAtlas.width, height = rawAtlas.height;
-        int horizontal = Mathf.FloorToInt(width * 1.0f / cellWidth),
-            vertical = Mathf.FloorToInt(height * 1.0f / cellHeight);
+
+        int horizontal = getRealNum(width, cellWidth, offset.x, padding.x),
+            vertical = getRealNum(height, cellHeight, offset.y, padding.y);
         var colorsCollection = new List<Color[]>();
         for (var v = 0; v < vertical; v++)
         {
@@ -29,9 +31,9 @@ public static class PictureUtils
                 {
                     for (var py = 0; py < cellHeight; py++)
                     {
-                        var x = h * cellWidth + px;
+                        var x = h * (cellWidth + padding.x) + offset.x + px;
                         // var y = v * cellHeight + py;
-                        var y = height - (v + 1) * cellHeight + py;
+                        var y = height - ((v + 1) * cellHeight + v * padding.y + offset.y) + py;
                         var index = x + y * width;
                         if (index < 0 || index >= pixels.Length) continue;
                         var pixel = pixels[index];
@@ -55,7 +57,8 @@ public static class PictureUtils
         return result;
     }
 
-    public static void PackAtlas(IList<Texture2D> textures, string output)
+    public static void PackAtlas(IList<Texture2D> textures, string output, Vector2Int offset = default,
+        Vector2Int padding = default)
     {
         const int minSize = 1024, maxSize = 2048;
         var numCells = textures.Count;
@@ -68,8 +71,11 @@ public static class PictureUtils
 
         var cellWidth = totalWidth / numCells;
         var cellHeight = totalHeight / numCells;
-        var minNum = (minSize / cellWidth) * (minSize / cellHeight);
-        var maxNum = (maxSize / cellWidth) * (maxSize / cellHeight);
+
+        var minNum = getRealNum(minSize, cellWidth, offset.x, padding.x) *
+                     getRealNum(minSize, cellHeight, offset.y, padding.y);
+        var maxNum = getRealNum(maxSize, cellWidth, offset.x, padding.x) *
+                     getRealNum(maxSize, cellHeight, offset.y, padding.y);
         if (numCells > maxNum)
         {
             Debug.LogError($"Out Of Range numCells:{numCells}");
@@ -85,42 +91,53 @@ public static class PictureUtils
         else
         {
             width = maxSize;
-            var col = width / cellWidth;
+            var col = getRealNum(maxSize, cellWidth, offset.x, padding.x);
             var row = Mathf.CeilToInt(numCells * 1f / col);
-            height = row * cellHeight <= minSize ? minSize : maxSize;
+            height = row * cellHeight + (row - 1) * padding.y <= (minSize - padding.y) ? minSize : maxSize;
         }
 
         var atlas = new Texture2D(width, height, TextureFormat.ARGB32, false);
         var collectionIndex = 0;
-        int atlasX = 0, atlasY = height - cellHeight;
+        int atlasX = offset.x, atlasY = height - cellHeight - offset.y;
         var atlasPixels = new Color[width * height];
         while (collectionIndex < textures.Count)
         {
             if (width - atlasX < cellWidth)
             {
-                atlasX = 0;
-                atlasY -= cellHeight;
+                atlasX = offset.x;
+                atlasY -= (cellHeight + padding.y);
                 continue;
             }
 
             var colors = textures[collectionIndex++].GetPixels();
-            Parallel.For(0, cellWidth, cx =>
+            Parallel.For(0, cellHeight, cy =>
             {
-                Parallel.For(0, cellHeight, cy =>
+                Parallel.For(0, cellWidth, cx =>
                 {
                     int px = atlasX + cx, py = atlasY + cy;
                     var color = colors[cx + cy * cellWidth];
                     var index = px + py * width;
-                    if (index >= 0 && index < atlasPixels.Length) atlasPixels[px + py * width] = color;
+                    if (index >= 0 && index < atlasPixels.Length)
+                    {
+                        atlasPixels[index] = color;
+                    }
                 });
             });
-            atlasX += cellWidth;
+            atlasX += cellWidth + padding.x;
         }
 
         atlas.SetPixels(atlasPixels);
         var bytes = atlas.EncodeToPNG();
         System.IO.File.WriteAllBytes(output, bytes);
         UnityEditor.AssetDatabase.Refresh();
+    }
+
+    private static int getRealNum(int size, int cellsize, int offset, int gap)
+    {
+        var num = (size - offset) / (cellsize + gap);
+        if (cellsize * (num + 1) + num * gap <= (size - offset))
+            return num + 1;
+        return num;
     }
 
     public static Texture2D Grayscale(Texture2D image, int channel = 3)
