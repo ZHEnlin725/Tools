@@ -14,8 +14,12 @@ namespace TilemapUtils
     {
         private static readonly Vector3[] HexagonalPointedTopVertices =
         {
-            new Vector3(0, 0.5f), new Vector3(-0.5f, 0.25f), new Vector3(-0.5f, -0.25f), new Vector3(0, -0.5f),
-            new Vector3(0.5f, -0.25f), new Vector3(0.5f, 0.25f),
+            new Vector3(0, 0.5f),
+            new Vector3(-0.5f, 0.25f), 
+            new Vector3(-0.5f, -0.25f), 
+            new Vector3(0, -0.5f),
+            new Vector3(0.5f, -0.25f), 
+            new Vector3(0.5f, 0.25f),
         };
 
         public static Texture2D GenerateTexture(Tilemap tilemap, int pixelsPerUnit = 100, float tilescale = -1f,
@@ -354,14 +358,15 @@ namespace TilemapUtils
             }
         }
 
-        public static Texture2D GenerateTexture(IList<Tilemap> tilemaps, int pixelsPerUnit = 100, int tilescale = -1)
+        public static Texture2D GenerateTexture(IList<Tilemap> tilemaps, int pixelsPerUnit = 100, float tilescale = -1,
+            float textureExtents = 0f)
         {
             tilemaps.Sort((x, y) => x.GetComponent<Renderer>().sortingOrder - y.GetComponent<Renderer>().sortingOrder);
             var length = tilemaps.Count;
             var boundsInWorld = new Bounds(Vector3.negativeInfinity, Vector3.negativeInfinity);
             for (var i = length - 1; i >= 0; i--)
             {
-                var tilemapBounds = GetTilemapBoundsInWorld(tilemaps[i]);
+                var tilemapBounds = GetTilemapBoundsInWorld(tilemaps[i], tilescale, textureExtents);
                 if (Mathf.Approximately(tilemapBounds.size.x * tilemapBounds.size.y, 0))
                 {
                     Debug.LogError($"Remove None Tile Tilemap {tilemaps[i].gameObject.name}");
