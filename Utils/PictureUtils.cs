@@ -1,13 +1,12 @@
-#if UNITY_EDITOR
-
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEngine;
+using UnityEngine.TextCore.Text;
 
 public static class PictureUtils
 {
-    private static readonly ParallelOptions pOptions = new ParallelOptions()
+    private static readonly ParallelOptions parallelOptions = new ParallelOptions()
     {
         MaxDegreeOfParallelism = 16
     };
@@ -57,7 +56,7 @@ public static class PictureUtils
         return result;
     }
 
-    public static void PackAtlas(IList<Texture2D> textures, string output, Vector2Int offset = default,
+    public static Texture2D PackAtlas(IList<Texture2D> textures, Vector2Int offset = default,
         Vector2Int padding = default)
     {
         const int minSize = 1024, maxSize = 2048;
@@ -79,7 +78,7 @@ public static class PictureUtils
         if (numCells > maxNum)
         {
             Debug.LogError($"Out Of Range numCells:{numCells}");
-            return;
+            return null;
         }
 
         int width, height;
@@ -127,16 +126,82 @@ public static class PictureUtils
         }
 
         atlas.SetPixels(atlasPixels);
-        var bytes = atlas.EncodeToPNG();
-        System.IO.File.WriteAllBytes(output, bytes);
-        UnityEditor.AssetDatabase.Refresh();
+        return atlas;
+    }
+
+    public static Texture2D RotateTexture(Texture2D texture, float angle)
+    {
+        var theta = angle * Mathf.Deg2Rad;
+
+        Vector4 inverse(Vector4 m) =>
+            new Vector4(m.w, -m.y, -m.z, m.x) / (m.x * m.w - m.y * m.z);
+
+        Vector2 mul(Vector4 m, Vector2 v)
+        {
+            var x = m.x * v.x + m.y * v.y;
+            var y = m.z * v.x + m.w * v.y;
+            return new Vector2(x, y);
+        }
+
+        var matrix = new Vector4(Mathf.Cos(theta), -Mathf.Sin(theta),
+            Mathf.Sin(theta), Mathf.Cos(theta));
+
+        int spriteWidth = texture.width, spriteHeight = texture.height;
+        var sprietCenter = new Vector2(spriteWidth, spriteHeight) * 0.5f;
+        var lb = mul(matrix, Vector2.zero - sprietCenter) + sprietCenter;
+        var rt = mul(matrix, sprietCenter) + sprietCenter;
+        var rb = mul(matrix, new Vector2(sprietCenter.x * 2, 0) - sprietCenter) + sprietCenter;
+        var lt = mul(matrix, new Vector2(0, sprietCenter.y * 2) - sprietCenter) + sprietCenter;
+        var w = Mathf.Max(lb.x, rt.x, rb.x, lt.x) -
+                Mathf.Min(lb.x, rt.x, rb.x, lt.x);
+        var h = Mathf.Max(lb.y, rt.y, rb.y, lt.y) -
+                Mathf.Min(lb.y, rt.y, rb.y, lt.y);
+        int newWidth = Mathf.CeilToInt(w), newHeight = Mathf.CeilToInt(h);
+        var newCenter = new Vector2(w / 2, h / 2);
+        var spritePixels = texture.GetPixels();
+        var newPixels = new Color[newWidth * newHeight];
+        
+        Parallel.For(0, spriteWidth, x =>
+        {
+            Parallel.For(0, spriteHeight, y =>
+            {
+                var point = mul(matrix, new Vector2(x, y) - sprietCenter) + newCenter;
+                var px = Mathf.RoundToInt(point.x);
+                var py = Mathf.RoundToInt(point.y);
+                if (px >= 0 && px < newWidth && py >= 0 && py < newHeight)
+                {
+                    var pixel = biCubicInterploator(spritePixels, spriteWidth, spriteHeight, px, py, 1, 1);
+                    var index = px + py * newWidth;
+                    newPixels[index] = pixel;
+                }
+            });
+        });
+
+        var inverse_matrix = inverse(matrix);
+        Parallel.For(0, newWidth, x =>
+        {
+            Parallel.For(0, newHeight, y =>
+            {
+                var point = mul(inverse_matrix, new Vector2(x, y) - newCenter) + sprietCenter;
+                var px = Mathf.RoundToInt(point.x);
+                var py = Mathf.RoundToInt(point.y);
+                if (px >= 0 && px < spriteWidth && py >= 0 && py < spriteHeight)
+                {
+                    newPixels[x + y * newWidth] =
+                        biCubicInterploator(spritePixels, spriteWidth, spriteHeight, px, py, 1, 1);
+                }
+            });
+        });
+        var result = new Texture2D(newWidth, newHeight, TextureFormat.RGBA32, false);
+        result.SetPixels(newPixels);
+        result.Apply();
+        return result;
     }
 
     private static int getRealNum(int size, int cellsize, int offset, int gap)
     {
         var num = (size - offset) / (cellsize + gap);
-        if (cellsize * (num + 1) + num * gap <= (size - offset))
-            return num + 1;
+        if (cellsize * (num + 1) + num * gap <= (size - offset)) num++;
         return num;
     }
 
@@ -153,7 +218,7 @@ public static class PictureUtils
     {
         int length = pixels.Length;
         Color[] dest = new Color[length];
-        Parallel.For(0, length, PictureUtils.pOptions, (Action<int>) (i =>
+        Parallel.For(0, length, PictureUtils.parallelOptions, (Action<int>) (i =>
         {
             float num = pixels[i][channel];
             dest[i] = new Color()
@@ -171,7 +236,7 @@ public static class PictureUtils
     {
         int length = pixels.Length;
         Color[] result = new Color[length];
-        Parallel.For(0, length, PictureUtils.pOptions, (Action<int>) (i =>
+        Parallel.For(0, length, PictureUtils.parallelOptions, (Action<int>) (i =>
         {
             Color pixel = pixels[i];
             result[i] = new Color(1f - pixel.r, 1f - pixel.g, 1f - pixel.b, 1f - pixel.a);
@@ -181,13 +246,15 @@ public static class PictureUtils
 
     public static Color[] Shrink(int width, int height, Color[] pixels, float scaleX, float scaleY)
     {
+        scaleX = Math.Abs(scaleX);
+        scaleY = Math.Abs(scaleY);
         int newWidth = Mathf.FloorToInt((float) width * scaleX);
         int newHeight = Mathf.FloorToInt((float) height * scaleY);
         float inv_scaleX = 1f / scaleX;
         float inv_scaleY = 1f / scaleY;
         Color[] newPixels = new Color[newWidth * newHeight];
-        Parallel.For(0, newWidth, PictureUtils.pOptions,
-            (Action<int>) (x => Parallel.For(0, newHeight, PictureUtils.pOptions,
+        Parallel.For(0, newWidth, PictureUtils.parallelOptions,
+            (Action<int>) (x => Parallel.For(0, newHeight, PictureUtils.parallelOptions,
                 (Action<int>) (y =>
                     newPixels[x + y * newWidth] =
                         PictureUtils.biCubicInterploator(pixels, width, height, x, y, inv_scaleX, inv_scaleY)))));
@@ -210,7 +277,7 @@ public static class PictureUtils
         float[] red = new float[width * height];
         float[] green = new float[width * height];
         float[] blue = new float[width * height];
-        Parallel.For(0, source.Length, PictureUtils.pOptions, (Action<int>) (i =>
+        Parallel.For(0, source.Length, PictureUtils.parallelOptions, (Action<int>) (i =>
         {
             alpha[i] = source[i].a;
             red[i] = source[i].r;
@@ -226,7 +293,7 @@ public static class PictureUtils
             (Action) (() => PictureUtils.gaussBlur_4(red, newRed, width, height, blurRadial)),
             (Action) (() => PictureUtils.gaussBlur_4(green, newGreen, width, height, blurRadial)),
             (Action) (() => PictureUtils.gaussBlur_4(blue, newBlue, width, height, blurRadial)));
-        Parallel.For(0, dest.Length, PictureUtils.pOptions, (Action<int>) (i =>
+        Parallel.For(0, dest.Length, PictureUtils.parallelOptions, (Action<int>) (i =>
         {
             if ((double) newAlpha[i] > 1.0)
                 newAlpha[i] = 1f;
@@ -282,7 +349,7 @@ public static class PictureUtils
     private static void boxBlurH_4(float[] source, float[] dest, int w, int h, int r)
     {
         double iar = 1.0 / (double) (r + r + 1);
-        Parallel.For(0, h, PictureUtils.pOptions, (Action<int>) (i =>
+        Parallel.For(0, h, PictureUtils.parallelOptions, (Action<int>) (i =>
         {
             int index1 = i * w;
             int num1 = index1;
@@ -315,7 +382,7 @@ public static class PictureUtils
     private static void boxBlurT_4(float[] source, float[] dest, int w, int h, int r)
     {
         double iar = 1.0 / (double) (r + r + 1);
-        Parallel.For(0, w, PictureUtils.pOptions, (Action<int>) (i =>
+        Parallel.For(0, w, PictureUtils.parallelOptions, (Action<int>) (i =>
         {
             int index1 = i;
             int index2 = index1;
@@ -389,4 +456,3 @@ public static class PictureUtils
         return color;
     }
 }
-#endif
