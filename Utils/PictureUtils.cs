@@ -2,7 +2,21 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEngine;
-using UnityEngine.TextCore.Text;
+
+public partial class TextureSlicingInfo
+{
+    public class Slicing
+    {
+        public RectInt position;
+        public Texture2D texture;
+    }
+
+    public int width, height;
+    public Slicing[,] slicings;
+
+    public int originX, originY;
+    public int offsetX, offsetY;
+}
 
 public static class PictureUtils
 {
@@ -160,7 +174,7 @@ public static class PictureUtils
         var newCenter = new Vector2(w / 2, h / 2);
         var spritePixels = texture.GetPixels();
         var newPixels = new Color[newWidth * newHeight];
-        
+
         Parallel.For(0, spriteWidth, x =>
         {
             Parallel.For(0, spriteHeight, y =>
@@ -196,6 +210,168 @@ public static class PictureUtils
         result.SetPixels(newPixels);
         result.Apply();
         return result;
+    }
+
+    public static TextureSlicingInfo SliceTexture(Texture2D texture, int unitWidth, int unitHeight,
+        int centerOffsetX = 0, int centerOffsetY = 0) =>
+        SliceTexture(texture.GetPixels(), texture.width, texture.height, unitWidth, unitHeight, centerOffsetX,
+            centerOffsetY);
+
+    public static TextureSlicingInfo SliceTexture(Color[] pixels, int width, int height, int unitWidth,
+        int unitHeight, int centerOffsetX = 0, int centerOffsetY = 0)
+    {
+        Color[] GetPixels(int x, int y, int rectWidth, int rectHeight)
+        {
+            var colors = new Color[rectWidth * rectHeight];
+            for (int px = 0; px < rectWidth; px++)
+            {
+                for (int py = 0; py < rectHeight; py++)
+                {
+                    colors[px + py * rectWidth] = pixels[px + x + (py + y) * width];
+                }
+            }
+
+            return colors;
+        }
+
+        var rectInts = SliceToRects(width, height, unitWidth, unitHeight, centerOffsetX, centerOffsetY);
+        var result = new TextureSlicingInfo {width = width, height = height};
+        var length0 = rectInts.GetLength(0);
+        var length1 = rectInts.GetLength(1);
+        var slicings = new TextureSlicingInfo.Slicing[length0, length1];
+        result.slicings = slicings;
+
+        int halfTexWidth = width / 2, halfTexHeight = height / 2;
+
+        int horizontal_left_count = Mathf.CeilToInt((width - halfTexWidth + centerOffsetX) * 1f / unitWidth);
+        int vertical_down_count = Mathf.CeilToInt((height - halfTexHeight + centerOffsetY) * 1f / unitHeight);
+
+        int auxX = horizontal_left_count * unitWidth, auxY = vertical_down_count * unitHeight;
+        int originX = -(width - halfTexWidth), originY = -(height - halfTexHeight);
+        result.originX = originX;
+        result.originY = originY;
+
+        result.offsetX = -(auxX + originX);
+        result.offsetY = -(auxY + originY);
+        for (int x = 0; x < length0; x++)
+        {
+            for (int y = 0; y < length1; y++)
+            {
+                var rect = rectInts[x, y];
+                var texture = new Texture2D(rect.width, rect.height, TextureFormat.ARGB32, false);
+                int rectX = rect.x - originX, rectY = rect.y - originY; //remap x:0~width y:0~height
+                var colors = GetPixels(rectX, rectY, rect.width, rect.height);
+                texture.SetPixels(colors);
+                var slicing = new TextureSlicingInfo.Slicing
+                {
+                    position = rect,
+                    texture = texture
+                };
+                slicings[x, y] = slicing;
+            }
+        }
+
+        return result;
+    }
+
+    public static RectInt[,] SliceToRects(int texWidth, int texHeight, int unitWidth, int unitHeight, int centerOffsetX,
+        int centerOffsetY)
+    {
+        int halfTexWidth = texWidth / 2, halfTexHeight = texHeight / 2;
+        int horizontal_left_count = Mathf.CeilToInt((texWidth - halfTexWidth + centerOffsetX) * 1f / unitWidth);
+        int horizontal_right_count = Mathf.CeilToInt((halfTexWidth - centerOffsetX) * 1f / unitWidth);
+        int vertical_up_count = Mathf.CeilToInt((halfTexHeight - centerOffsetY) * 1f / unitHeight);
+        int vertical_down_count = Mathf.CeilToInt((texHeight - halfTexHeight + centerOffsetY) * 1f / unitHeight);
+        // int originX = -(texWidth - halfTexWidth), originY = -(texHeight - halfTexHeight);
+        int offsetX = horizontal_left_count * unitWidth, offsetY = vertical_down_count * unitHeight;
+        var rightWidth = halfTexWidth - centerOffsetX;
+        var leftWidth = texWidth - rightWidth;
+        var upHeight = halfTexHeight - centerOffsetY;
+        var downHeight = texHeight - upHeight;
+        var rects = new RectInt[horizontal_right_count + horizontal_left_count,
+            vertical_up_count + vertical_down_count];
+
+        //right up
+        int usedWidth = 0, usedHeight;
+        for (var x = 0; x < horizontal_right_count; x++)
+        {
+            usedHeight = 0;
+            var rectMinX = x * unitWidth + centerOffsetX;
+            var rectWidth = Mathf.Min(rightWidth - usedWidth, unitWidth);
+            for (var y = 0; y < vertical_up_count; y++)
+            {
+                var rectHeight = Mathf.Min(upHeight - usedHeight, unitHeight);
+                var rectMinY = y * unitHeight + centerOffsetY;
+                var rectInt = new RectInt(rectMinX, rectMinY, rectWidth, rectHeight);
+                rects[Mathf.FloorToInt((rectMinX + offsetX) * 1f / unitWidth),
+                    Mathf.FloorToInt((rectMinY + offsetY) * 1f / unitHeight)] = rectInt;
+                usedHeight += rectHeight;
+            }
+
+            usedWidth += rectWidth;
+        }
+
+        //right down
+        usedWidth = 0;
+        for (var x = 0; x < horizontal_right_count; x++)
+        {
+            usedHeight = 0;
+            var rectMinX = x * unitWidth + centerOffsetX;
+            var rectWidth = Mathf.Min(rightWidth - usedWidth, unitWidth);
+            for (var y = 0; y < vertical_down_count; y++)
+            {
+                var rectHeight = Mathf.Min(downHeight - usedHeight, unitHeight);
+                var rectMinY = -rectHeight - y * unitHeight + centerOffsetY;
+                var rectInt = new RectInt(rectMinX, rectMinY, rectWidth, rectHeight);
+                rects[Mathf.FloorToInt((rectMinX + offsetX) * 1f / unitWidth),
+                    Mathf.FloorToInt((rectMinY + offsetY) * 1f / unitHeight)] = rectInt;
+                usedHeight += rectHeight;
+            }
+
+            usedWidth += rectWidth;
+        }
+
+        //left up
+        usedWidth = 0;
+        for (int x = 0; x < horizontal_left_count; x++)
+        {
+            usedHeight = 0;
+            var rectWidth = Mathf.Min(leftWidth - usedWidth, unitWidth);
+            var rectMinX = -rectWidth - x * unitWidth + centerOffsetX;
+            for (int y = 0; y < vertical_up_count; y++)
+            {
+                var rectHeight = Mathf.Min(upHeight - usedHeight, unitHeight);
+                var rectMinY = y * unitHeight + centerOffsetY;
+                var rectInt = new RectInt(rectMinX, rectMinY, rectWidth, rectHeight);
+                rects[Mathf.FloorToInt((rectMinX + offsetX) * 1f / unitWidth),
+                    Mathf.FloorToInt((rectMinY + offsetY) * 1f / unitHeight)] = rectInt;
+                usedHeight += rectHeight;
+            }
+
+            usedWidth += rectWidth;
+        }
+
+        //left down
+        usedWidth = 0;
+        for (int x = 0; x < horizontal_left_count; x++)
+        {
+            usedHeight = 0;
+            var rectWidth = Mathf.Min(leftWidth - usedWidth, unitWidth);
+            var rectMinX = -rectWidth - x * unitWidth + centerOffsetX;
+            for (int y = 0; y < vertical_down_count; y++)
+            {
+                var rectHeight = Mathf.Min(downHeight - usedHeight, unitHeight);
+                var rectMinY = -rectHeight - y * unitHeight + centerOffsetY;
+                var rectInt = new RectInt(rectMinX, rectMinY, rectWidth, rectHeight);
+                rects[Mathf.FloorToInt((rectMinX + offsetX) * 1f / unitWidth),
+                    Mathf.FloorToInt((rectMinY + offsetY) * 1f / unitHeight)] = rectInt;
+                usedHeight += rectHeight;
+            }
+
+            usedWidth += rectWidth;
+        }
+
+        return rects;
     }
 
     private static int getRealNum(int size, int cellsize, int offset, int gap)
