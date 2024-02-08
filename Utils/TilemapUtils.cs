@@ -19,6 +19,8 @@ public class HexagonalPointedTopTilemap
         new Vector3(0.5f, 0.25f),
     };
 
+    public static readonly Bounds smallest = new Bounds(Vector3.negativeInfinity, Vector3.negativeInfinity);
+
     public static Texture2D GenerateTexture(Tilemap tilemap, int pixelsPerUnit = 100, float tilescale = -1f,
         float textureExtents = 0f)
     {
@@ -55,7 +57,7 @@ public class HexagonalPointedTopTilemap
     {
         var cellSize = tilemap.cellSize;
         var cellBounds = tilemap.cellBounds;
-        var tilemapScale = tilemap.transform.localScale;
+        var tilemapScale = GetGlobalScale(tilemap.transform);
         var cellScale = new Vector3(cellSize.x * tilemapScale.x, cellSize.y * tilemapScale.y,
             cellSize.z * tilemapScale.z);
         if (tilescale > 0) cellScale *= tilescale;
@@ -87,7 +89,9 @@ public class HexagonalPointedTopTilemap
                 var atlasTexWidth = atlasTexture.width;
                 int tileTexWidth = (int) rect.width, tileTexHeight = (int) rect.height;
                 var spriteShrinked = false;
-                if (tilescale > 0)
+                if (Math.Abs(cellScale.x - 1) > float.Epsilon ||
+                    Math.Abs(cellScale.y - 1) > float.Epsilon ||
+                    Math.Abs(cellScale.z - 1) > float.Epsilon)
                 {
                     spriteShrinked = true;
                     tileTexture = ShrinkSprite(sprite, pixelsPerCellHorizontal * 1f / tileTexWidth,
@@ -135,16 +139,10 @@ public class HexagonalPointedTopTilemap
 
                         int ix = px + (int) pxOffset, iy = py + (int) pyOffset;
                         var index = ix + iy * imageWidth;
-                        if (index < numPixels && index >= 0)
+                        if (index < targetPixels.Length && index >= 0)
                         {
-                            // var col = targetPixels[index];
-                            // var alpha = pixel.a;
-                            // var blend = alpha * pixel + (1 - alpha) * col;
-                            // targetPixels[index] = blend;
-                            
                             var col = targetPixels[index];
                             // Blend SrcAlpha OneMinusSrcAlpha
-                            // var blend = pixel.a * pixel + (1 - pixel.a) * col;
                             var oneMinusSrcAlpha = 1 - pixel.a;
                             col.r = pixel.a * pixel.r + oneMinusSrcAlpha * col.r;
                             col.g = pixel.a * pixel.g + oneMinusSrcAlpha * col.g;
@@ -169,7 +167,7 @@ public class HexagonalPointedTopTilemap
         var spriteObject = renderer.gameObject;
         var transform = spriteObject.transform;
         var spriteBoundsInWorld = renderer.bounds;
-        var scale = transform.localScale;
+        var scale = GetGlobalScale(transform);
         var angle = transform.eulerAngles.z;
         var spriteRect = sprite.rect;
         int scaleSignX = scale.x >= 0 ? 1 : -1, scaleSignY = scale.y >= 0 ? 1 : -1;
@@ -243,7 +241,6 @@ public class HexagonalPointedTopTilemap
                 {
                     var col = targetPixels[index];
                     // Blend SrcAlpha OneMinusSrcAlpha
-                    // var blend = pixel.a * pixel + (1 - pixel.a) * col;
                     var oneMinusSrcAlpha = 1 - pixel.a;
                     col.r = pixel.a * pixel.r + oneMinusSrcAlpha * col.r;
                     col.g = pixel.a * pixel.g + oneMinusSrcAlpha * col.g;
@@ -265,13 +262,15 @@ public class HexagonalPointedTopTilemap
         var boundsInWorld = new Bounds(Vector3.negativeInfinity, Vector3.negativeInfinity);
         for (var i = length - 1; i >= 0; i--)
         {
-            var tilemapBounds = GetTilemapBoundsInWorld(tilemaps[i], tilescale, textureExtents);
-            if (Mathf.Approximately(tilemapBounds.size.x * tilemapBounds.size.y, 0))
+            var tilemap = tilemaps[i];
+            if (Mathf.Approximately(tilemap.cellBounds.size.x * tilemap.cellBounds.size.y, 0))
             {
+                Debug.LogError($"remove{i}");
                 tilemaps.RemoveAt(i);
                 continue;
             }
 
+            var tilemapBounds = GetTilemapBoundsInWorld(tilemap, tilescale, textureExtents);
             boundsInWorld.Encapsulate(tilemapBounds);
         }
 
@@ -299,18 +298,16 @@ public class HexagonalPointedTopTilemap
     {
         var cellSize = tilemap.cellSize;
         var cellBounds = tilemap.cellBounds;
-        var tilemapScale = tilemap.transform.localScale;
+        var tilemapScale = GetGlobalScale(tilemap.transform);
 
         var cellScale = new Vector3(cellSize.x * tilemapScale.x, cellSize.y * tilemapScale.y,
             cellSize.z * tilemapScale.z);
         if (tilescale > 0) cellScale *= tilescale;
 
-        var boundsInWorld = new Bounds(Vector3.negativeInfinity, Vector3.zero);
-        for (var x = cellBounds.min.x;
-            x < cellBounds.max.x;
-            x++)
+        var boundsInWorld = smallest;
+        for (var x = cellBounds.min.x; x <= cellBounds.max.x; x++)
         {
-            for (var y = cellBounds.min.y; y < cellBounds.max.y; y++)
+            for (var y = cellBounds.min.y; y <= cellBounds.max.y; y++)
             {
                 var cellPosition = new Vector3Int(x, y, 0);
                 if (tilemap.HasTile(cellPosition))
@@ -335,6 +332,22 @@ public class HexagonalPointedTopTilemap
         num |= num >> 8;
         num |= num >> 16;
         return num + 1;
+    }
+
+    private static Vector3 GetGlobalScale(Transform transform)
+    {
+        var t = transform;
+        var result = Vector3.one;
+        while (t != null)
+        {
+            var localScale = t.localScale;
+            result.x *= localScale.x;
+            result.y *= localScale.y;
+            result.z *= localScale.z;
+            t = t.parent;
+        }
+
+        return result;
     }
 
     private static Texture2D ShrinkImage(Texture2D texture, float scaleX, float scaleY)
